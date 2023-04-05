@@ -59,7 +59,9 @@ Razie Hyria - Mathyo Abou Asali|#
         [(thisE) this-val]
         [(argE) arg-val]
         [(newE class-name field-exprs)
-         (local [(define c (find classes class-name))
+         (local [(define c (if (equal? class-name 'Object) 
+                           (classC empty empty)
+                           (find classes class-name)))
                  (define vals (map recur field-exprs))]
            (if (= (length vals) (length (classC-field-names c)))
                (objV class-name vals)
