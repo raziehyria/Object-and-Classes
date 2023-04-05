@@ -80,27 +80,29 @@ Razie Hyria - Mathyo Abou Asali|#
                            field-vals)
                      field-name)])]
            [else (error 'interp "not an object")])]
-        ;; Part 2 — Conditional via select
+           
+        ;; Part 2 — Conditional via select———————————————————
            ;; make sure num is a num that is 0 or non zero
            ;; method name changes depending on what num is
            ;; class-name comes from objv
            ;; fieldnames is internal to the object
            ;; classes is passed in
            ;; argval isn't passed anything just give it anything, a num or letter, to not trip it
+           
         [(selectE test-expr obj-expr)
-         (local [(define obj (recur obj-expr))
+         (local [(define obj (recur obj-expr)) ;get some number from doing recur
                  (define num (recur test-expr))]
-           ;; make sure num is a numV
-           (type-case Value num
+           
+           (type-case Value num ;check if its a number
              [(numV n)
-              ;; make sure obj is an objV
-              (type-case Value obj
-                [(objV class-name field-vals)
-                 (call-method class-name (if (zero? n) 'zero 'nonzero) classes
-                              obj arg-val)]
+              
+              (type-case Value obj ;check if its an object
+                [(objV class-name field-vals) ;check that is 0 or non zero
+                 (call-method class-name (if (zero? n) 'zero 'nonzero) classes ;dictates what we send our objV
+                              obj (numV 1))] ;; change from argval to random item, to avoid parser error (hence failed test case)
                 [else (error 'interp "not an object")])]
-             [else (error 'interp "invalid input")]))]
-        
+             [else (error 'interp "not a number")]))]
+        ——————————————————————————————————————————————————————————————————————
         [(sendE obj-expr method-name arg-expr)
          (local [(define obj (recur obj-expr))
                  (define arg-val (recur arg-expr))]
@@ -342,13 +344,20 @@ Razie Hyria - Mathyo Abou Asali|#
       [(numV n) (number->s-exp n)]
       [(objV class-name field-vals) `object])))
 
+#| NOTES FOR PART 3 --inclass
+(define (isinst obj lookn4 classes) ;; lookn4 = symbol
+  (cond
+    [(if (= (class-name obj) lookn4) #t)] ;; adjust the way we reference "class-name"
+    [(if (= (class-name obj) 'Object) #f)] ;; cant directly acces "class-name"
+    [else (isinst (super-name obj) lookn4 classes)]))
 
+;; assuming we extende class C to contain super-name, attr, field
+;; extend classI to contain supername, attr, field|#
  
 ;; All Test Cases ============================================================
-
 ;; Hw Test cases ----------------------------------------
 
-;pt1--
+;pt1 (full coverage) ----------------------
 (test (interp-prog (list) 
                    `{new Object})
       `object)
@@ -357,7 +366,7 @@ Razie Hyria - Mathyo Abou Asali|#
                    `{new Object})
       `object)
 
-;pt2--
+;pt2 test cases (full coverage)----------------------
 (test (interp-prog (list `{class Snowball extends Object
                             {size}
                             [zero {arg} this]
@@ -374,14 +383,16 @@ Razie Hyria - Mathyo Abou Asali|#
       `2)
 
 
+;not a num;
 (test/exn (interp-prog (list `{class Snowball extends Object
-                            {size}
-                            [zero {arg} this]
-                            [nonzero {arg}
-                                     {new Snowball {+ 1 {get this size}}}]})
-                   `{get {select "" {new Snowball 1}} size})
-          "invalid input")
+                                {size}
+                                [zero {arg} this]
+                                [nonzero {arg}
+                                         {new Snowball {+ 1 {get this size}}}]})
+                       `{get {select {new Snowball 1} {new Snowball 1}} size}) ;; passing in object instead of num/strings
+          "not a number")
 
+;not an object;
 (test/exn (interp-prog (list `{class Snowball extends Object
                             {size}
                             [zero {arg} this]
@@ -390,7 +401,7 @@ Razie Hyria - Mathyo Abou Asali|#
                    `{get {select {+ 1 2} 42} size})
           "not an object")
 
-;pt3--
+;pt3 test cases ----------------------
 (test (interp-prog (list `{class Fish extends Object
                             {size color}})
                    `{instanceof {new Fish 1 2} Object})
