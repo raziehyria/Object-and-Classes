@@ -24,7 +24,10 @@ Razie Hyria - Mathyo Abou Asali|#
   (ssendE [obj-expr : Exp]
           [class-name : Symbol]
           [method-name : Symbol]
-          [arg-expr : Exp]))
+          [arg-expr : Exp])
+  (selectE [num-expr : Exp] ;; given in class pt2
+           [obj-expr : Exp]))
+
 
 (define-type Class
   (classC [field-names : (Listof Symbol)]
@@ -58,14 +61,15 @@ Razie Hyria - Mathyo Abou Asali|#
         [(multE l r) (num* (recur l) (recur r))]
         [(thisE) this-val]
         [(argE) arg-val]
-        [(newE class-name field-exprs)
-         (local [(define c (if (equal? class-name 'Object) 
-                           (classC empty empty)
-                           (find classes class-name)))
-                 (define vals (map recur field-exprs))]
-           (if (= (length vals) (length (classC-field-names c)))
-               (objV class-name vals)
-               (error 'interp "wrong field count")))]
+        ;;Part 1 — Instantiating Object---
+        [(newE class-name field-exprs) ;; fixing {new object}
+         (local [(define c (if(equal? class-name 'Object) 
+                              (classC empty empty)
+                              (find classes class-name)))
+                     (define vals (map recur field-exprs))]
+               (if (= (length vals) (length (classC-field-names c)))
+                   (objV class-name vals)
+                   (error 'interp "wrong field count")))]
         [(getE obj-expr field-name)
          (type-case Value (recur obj-expr)
            [(objV class-name field-vals)
@@ -76,6 +80,27 @@ Razie Hyria - Mathyo Abou Asali|#
                            field-vals)
                      field-name)])]
            [else (error 'interp "not an object")])]
+        ;; Part 2 — Conditional via select
+           ;; make sure num is a num that is 0 or non zero
+           ;; method name changes depending on what num is
+           ;; class-name comes from objv
+           ;; fieldnames is internal to the object
+           ;; classes is passed in
+           ;; argval isn't passed anything just give it anything, a num or letter, to not trip it
+        [(selectE test-expr obj-expr)
+         (local [(define obj (recur obj-expr))
+                 (define num (recur test-expr))]
+           ;; make sure num is a numV
+           (type-case Value num
+             [(numV n)
+              ;; make sure obj is an objV
+              (type-case Value obj
+                [(objV class-name field-vals)
+                 (call-method class-name (if (zero? n) 'zero 'nonzero) classes
+                              obj arg-val)]
+                [else (error 'interp "not an object")])]
+             [else (error 'interp "invalid input")]))]
+        
         [(sendE obj-expr method-name arg-expr)
          (local [(define obj (recur obj-expr))
                  (define arg-val (recur arg-expr))]
@@ -135,7 +160,9 @@ Razie Hyria - Mathyo Abou Asali|#
          [method-name : Symbol]
          [arg-expr : ExpI])
   (superI [method-name : Symbol]
-          [arg-expr : ExpI]))
+          [arg-expr : ExpI])
+  (selectI [num-expr : ExpI]
+            [obj-expr : ExpI]))
 
 (define-type ClassI
   (classI [super-name : Symbol]
@@ -165,7 +192,9 @@ Razie Hyria - Mathyo Abou Asali|#
        (ssendE (thisE)
                super-name
                method-name
-               (recur arg-expr))])))
+               (recur arg-expr))]
+       [(selectI num-expr obj-expr) ;; added selectI pt 2---
+       (selectE (recur num-expr) (recur obj-expr))])))
 
 ;; class-i->c-not-flat----------------------------------------
 
@@ -299,6 +328,10 @@ Razie Hyria - Mathyo Abou Asali|#
    [(s-exp-match? `{super SYMBOL ANY} s)
     (superI (s-exp->symbol (second (s-exp->list s)))
             (parse (third (s-exp->list s))))]
+   ;; updated parser for part 2---
+   [(s-exp-match? `{select ANY ANY} s)
+    (selectI (parse (second (s-exp->list s)))
+             (parse (third (s-exp->list s))))]
    [else (error 'parse "invalid input")]))
 
 ;; interp-prog ----------------------------------------
@@ -310,6 +343,7 @@ Razie Hyria - Mathyo Abou Asali|#
       [(objV class-name field-vals) `object])))
 
 
+ 
 ;; All Test Cases ============================================================
 
 ;; Hw Test cases ----------------------------------------
@@ -322,6 +356,7 @@ Razie Hyria - Mathyo Abou Asali|#
                             {size color}})
                    `{new Object})
       `object)
+
 ;pt2--
 (test (interp-prog (list `{class Snowball extends Object
                             {size}
@@ -337,6 +372,24 @@ Razie Hyria - Mathyo Abou Asali|#
                                      {new Snowball {+ 1 {get this size}}}]})
                    `{get {select {+ 1 2} {new Snowball 1}} size})
       `2)
+
+
+(test/exn (interp-prog (list `{class Snowball extends Object
+                            {size}
+                            [zero {arg} this]
+                            [nonzero {arg}
+                                     {new Snowball {+ 1 {get this size}}}]})
+                   `{get {select "" {new Snowball 1}} size})
+          "invalid input")
+
+(test/exn (interp-prog (list `{class Snowball extends Object
+                            {size}
+                            [zero {arg} this]
+                            [nonzero {arg}
+                                     {new Snowball {+ 1 {get this size}}}]})
+                   `{get {select {+ 1 2} 42} size})
+          "not an object")
+
 ;pt3--
 (test (interp-prog (list `{class Fish extends Object
                             {size color}})
@@ -355,7 +408,7 @@ Razie Hyria - Mathyo Abou Asali|#
                          `{class Shark extends Fish
                             {teeth}})
                    `{instanceof {new Shark 1 2 3} Fish})
-      `0)
+      `0) 
 (test (interp-prog (list `{class Fish extends Object
                             {size color}}
                          `{class Shark extends Fish
@@ -364,7 +417,7 @@ Razie Hyria - Mathyo Abou Asali|#
                             {}})
                    `{instanceof {new Hammerhead 1 2 3} Fish})
       `0)
-(test (interp-proc (list `{class PlainFish extends Object
+(test (interp-prog (list `{class PlainFish extends Object
                             {size}}
                          `{class ColorFish extends PlainFish
                             {color}}
@@ -557,7 +610,7 @@ Razie Hyria - Mathyo Abou Asali|#
                              (list (values 'm (numE 1))
                                    (values 'n (numE 2))))
         (list (values 'm (numE 1))
-              (values 'n (numE 2))))
+              (values 'n (numE 2)))) 
 
   (test (add/replace-method (list (values 'm (numE 0)))
                             (values 'm (numE 1)))
