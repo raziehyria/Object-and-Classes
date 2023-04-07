@@ -26,11 +26,18 @@ Razie Hyria - Mathyo Abou Asali|#
           [method-name : Symbol]
           [arg-expr : Exp])
   (selectE [num-expr : Exp] ;; given in class pt2
-           [obj-expr : Exp]))
+           [obj-expr : Exp])
+(instanceE [obj-expr : Exp]  ;; part 3 add instanceE
+             [class-name : Symbol]))
 
-
+#| Note @nate-kins: I tried it like this but it didnt work apparently the order matters 
 (define-type Class
   (classC [field-names : (Listof Symbol)]
+          [methods : (Listof (Symbol * Exp))]
+          [super-name : Symbol]))|#
+(define-type Class ;; pt3 extending class to contain super-names
+  (classC [super-name : Symbol]
+          [field-names : (Listof Symbol)]
           [methods : (Listof (Symbol * Exp))]))
 
 (define-type Value
@@ -38,7 +45,7 @@ Razie Hyria - Mathyo Abou Asali|#
   (objV [class-name : Symbol]
         [field-values : (Listof Value)]))
 
-;; ----------------------------------------
+;; find func ----------------------------------------
 
 (define (find [l : (Listof (Symbol * 'a))] [name : Symbol]) : 'a
   (type-case (Listof (Symbol * 'a)) l
@@ -49,7 +56,21 @@ Razie Hyria - Mathyo Abou Asali|#
          (snd p)
          (find rst-l name))]))
 
-;; ----------------------------------------
+;; PT.3 - sub-class helper func ----------------------------------------
+
+(define (sub-class? obj search classes)  ;; helper function for instanceE in the interp
+  ; check if the obj class name is the same as search
+  (cond
+    [(equal? obj search) #t]
+    ; check if the obj class name is 'Object
+    [(equal? obj 'Object) #f]
+    [else
+     ; if not recursively check if obj is an instance of the superclass of its class
+     (type-case Class (find classes obj)
+       [(classC super-name field-names methods)
+        (sub-class? super-name search classes)])]))
+
+;; interp func ----------------------------------------
 
 (define interp : (Exp (Listof (Symbol * Class)) Value Value -> Value)
   (lambda (a classes this-val arg-val)
@@ -61,33 +82,34 @@ Razie Hyria - Mathyo Abou Asali|#
         [(multE l r) (num* (recur l) (recur r))]
         [(thisE) this-val]
         [(argE) arg-val]
-        ;;Part 1 — Instantiating Object---
+
+        ;;Part 1 — Instantiating Object———————————————————
         [(newE class-name field-exprs) ;; fixing {new object}
          (local [(define c (if(equal? class-name 'Object) 
-                              (classC empty empty)
+                              (classC 'Object empty empty) ;;updating for Pt3 'Object
                               (find classes class-name)))
                      (define vals (map recur field-exprs))]
                (if (= (length vals) (length (classC-field-names c)))
                    (objV class-name vals)
                    (error 'interp "wrong field count")))]
+        
         [(getE obj-expr field-name)
          (type-case Value (recur obj-expr)
            [(objV class-name field-vals)
             (type-case Class (find classes class-name)
-              [(classC field-names methods)
+              [(classC super-name field-names methods) ; pt3 adjust
                (find (map2 (lambda (n v) (values n v))
                            field-names
                            field-vals)
                      field-name)])]
            [else (error 'interp "not an object")])]
            
-        ;; Part 2 — Conditional via select———————————————————
-           ;; make sure num is a num that is 0 or non zero
-           ;; method name changes depending on what num is
-           ;; class-name comes from objv
-           ;; fieldnames is internal to the object
-           ;; classes is passed in
-           ;; argval isn't passed anything just give it anything, a num or letter, to not trip it
+        ;;Part 2 — Conditional via select———————————————————
+           #|Note: 
+             make sure num is a num that is 0 or non zero
+             method name changes depending on what num is
+             class-name comes from objv, fieldnames is internal to the object
+             classes is passed in, argval is passed anything to not trip it|#
            
         [(selectE test-expr obj-expr)
          (local [(define obj (recur obj-expr)) ;get some number from doing recur
@@ -99,10 +121,11 @@ Razie Hyria - Mathyo Abou Asali|#
               (type-case Value obj ;check if its an object
                 [(objV class-name field-vals) ;check that is 0 or non zero
                  (call-method class-name (if (zero? n) 'zero 'nonzero) classes ;dictates what we send our objV
-                              obj (numV 1))] ;; change from argval to random item, to avoid parser error (hence failed test case)
+                              obj (numV 1))];; change from argval to random item, to avoid parser error (hence failed test case)
                 [else (error 'interp "not an object")])]
              [else (error 'interp "not a number")]))]
-        ——————————————————————————————————————————————————————————————————————
+        
+        ;sendE
         [(sendE obj-expr method-name arg-expr)
          (local [(define obj (recur obj-expr))
                  (define arg-val (recur arg-expr))]
@@ -111,16 +134,29 @@ Razie Hyria - Mathyo Abou Asali|#
               (call-method class-name method-name classes
                            obj arg-val)]
              [else (error 'interp "not an object")]))]
+        
+        ;; updating ssendE for pt3
         [(ssendE obj-expr class-name method-name arg-expr)
          (local [(define obj (recur obj-expr))
                  (define arg-val (recur arg-expr))]
            (call-method class-name method-name classes
-                        obj arg-val))]))))
+                        obj arg-val))]
+
+        ;;Part 3 — instanceof —————————————————— 
+        [(instanceE obj-expr class-name) 
+         (type-case Value (recur obj-expr) 
+           [(objV obj-class-name field-values) 
+            (if (sub-class? obj-class-name class-name classes) ; checking if the obj is an instance of class-name or one of its superclasses
+                (numV 0)  ; return 0
+                (begin  
+                  (find classes class-name)  ; if the object find the definition of class-name return 1
+                  (numV 1)))]
+           [else (error 'interp "not an object")])])))) ; otherwise not an object
 
 (define (call-method class-name method-name classes
                      obj arg-val)
   (type-case Class (find classes class-name)
-    [(classC field-names methods)
+    [(classC super-name field-names methods) ;; add super name part 3
      (let ([body-expr (find methods method-name)])
        (interp body-expr
                classes
@@ -138,10 +174,6 @@ Razie Hyria - Mathyo Abou Asali|#
 
 (define (num+ x y) (num-op + '+ x y))
 (define (num* x y) (num-op * '* x y))
-
-;; ----------------------------------------
-;; Examples
-
 
 ;; ============================================================
 ;; inherit
@@ -163,11 +195,13 @@ Razie Hyria - Mathyo Abou Asali|#
          [arg-expr : ExpI])
   (superI [method-name : Symbol]
           [arg-expr : ExpI])
-  (selectI [num-expr : ExpI]
-            [obj-expr : ExpI]))
+  (selectI [num-expr : ExpI] ;; pt2 - add selectI
+            [obj-expr : ExpI])
+(instanceI [obj-expr : ExpI]  ;; pt3 - add instanceI
+             [class-name : Symbol]))
 
 (define-type ClassI
-  (classI [super-name : Symbol]
+  (classI [super-name : Symbol] ;; pt3 - introduce a notion of superclasses
           [field-names : (Listof Symbol)]
           [methods : (Listof (Symbol * ExpI))]))
 
@@ -192,18 +226,20 @@ Razie Hyria - Mathyo Abou Asali|#
               (recur arg-expr))]
       [(superI method-name arg-expr)
        (ssendE (thisE)
-               super-name
+               super-name ;; pt3 - add supername
                method-name
                (recur arg-expr))]
-       [(selectI num-expr obj-expr) ;; added selectI pt 2---
-       (selectE (recur num-expr) (recur obj-expr))])))
-
+       [(selectI num-expr obj-expr) ;; pt 2--- added selectI 
+       (selectE (recur num-expr) (recur obj-expr))]
+      [(instanceI obj-expr class-name)  ;; part 3 --- update/add instanceI
+       (instanceE (recur obj-expr) class-name)])))
 ;; class-i->c-not-flat----------------------------------------
 
 (define (class-i->c-not-flat [c : ClassI]) : Class
   (type-case ClassI c
     [(classI super-name field-names methods)
      (classC
+      super-name ;; pt3 - add supername
       field-names
       (map (lambda (m)
              (values (fst m)
@@ -216,10 +252,11 @@ Razie Hyria - Mathyo Abou Asali|#
                        [classes-not-flat : (Listof (Symbol * Class))] 
                        [i-classes : (Listof (Symbol * ClassI))]) : Class
   (type-case Class (find classes-not-flat name)
-    [(classC field-names methods)
+    [(classC super-name field-names methods)
      (type-case Class (flatten-super name classes-not-flat i-classes)
-       [(classC super-field-names super-methods)
+       [(classC supper super-field-names super-methods) ;; part 3 - update
         (classC
+         super-name ;; pt3 - add supername
          (add-fields super-field-names field-names)
          (add/replace-methods super-methods methods))])]))
 
@@ -229,7 +266,7 @@ Razie Hyria - Mathyo Abou Asali|#
   (type-case ClassI (find i-classes name)
     [(classI super-name field-names i-methods)
      (if (equal? super-name 'Object)
-         (classC empty empty)
+         (classC 'Object empty empty) ;; part 3 - update
          (flatten-class super-name
                         classes-not-flat
                         i-classes))]))
@@ -278,10 +315,8 @@ Razie Hyria - Mathyo Abou Asali|#
     (interp a classes (objV 'Object empty) (numV 0))))
 
 
-
 ;; parse & interp-prog ============================================================
-
-;; parse-class ----------------------------------------
+;; parse-class ------
 (define (parse-class [s : S-Exp]) : (Symbol * ClassI)
   (cond
     [(s-exp-match? `{class SYMBOL extends SYMBOL {ANY ...} ANY ...} s)
@@ -330,13 +365,18 @@ Razie Hyria - Mathyo Abou Asali|#
    [(s-exp-match? `{super SYMBOL ANY} s)
     (superI (s-exp->symbol (second (s-exp->list s)))
             (parse (third (s-exp->list s))))]
-   ;; updated parser for part 2---
+   ;; updated parser for selectI part 2---
    [(s-exp-match? `{select ANY ANY} s)
     (selectI (parse (second (s-exp->list s)))
              (parse (third (s-exp->list s))))]
+
+   ;; updated parser for instanceI part 3---
+   [(s-exp-match? `{instanceof ANY SYMBOL} s)   ;; add instanceI
+     (instanceI (parse (second (s-exp->list s)))
+                (s-exp->symbol (third (s-exp->list s))))]
    [else (error 'parse "invalid input")]))
 
-;; interp-prog ----------------------------------------
+;; interp-prog --------
 (define (interp-prog [classes : (Listof S-Exp)] [a : S-Exp]) : S-Exp
   (let ([v (interp-i (parse a)
                      (map parse-class classes))])
@@ -344,19 +384,18 @@ Razie Hyria - Mathyo Abou Asali|#
       [(numV n) (number->s-exp n)]
       [(objV class-name field-vals) `object])))
 
-#| NOTES FOR PART 3 --inclass
-(define (isinst obj lookn4 classes) ;; lookn4 = symbol
-  (cond
-    [(if (= (class-name obj) lookn4) #t)] ;; adjust the way we reference "class-name"
-    [(if (= (class-name obj) 'Object) #f)] ;; cant directly acces "class-name"
-    [else (isinst (super-name obj) lookn4 classes)]))
-
-;; assuming we extende class C to contain super-name, attr, field
-;; extend classI to contain supername, attr, field|#
+    #| NOTES FOR PART 3 --inclass
+   (define (isinst obj lookn4 classes) ;; lookn4 = symbol
+     (cond
+       [(if (= (class-name obj) lookn4) #t)] ;; adjust the way we reference "class-name"
+       [(if (= (class-name obj) 'Object) #f)] ;; cant directly acces "class-name"
+       [else (isinst (super-name obj) lookn4 classes)]))
+        assuming we extend class C to contain super-name, attr, field
+        extend classI to contain supername, attr, field|#
  
 ;; All Test Cases ============================================================
-;; Hw Test cases ----------------------------------------
 
+;; Hw Test cases 
 ;pt1 (full coverage) ----------------------
 (test (interp-prog (list) 
                    `{new Object})
@@ -402,10 +441,15 @@ Razie Hyria - Mathyo Abou Asali|#
           "not an object")
 
 ;pt3 test cases ----------------------
-(test (interp-prog (list `{class Fish extends Object
+
+;; testing for 'not an object'
+(display "testing for 'not an object'\n")
+(test/exn (interp-prog (list `{class Fish extends Object
                             {size color}})
-                   `{instanceof {new Fish 1 2} Object})
-      `0)
+                   `{instanceof {+ 1 1} Cuck}) ;; testing 'else' in instanceE
+      "not an object") 
+
+
 (test (interp-prog (list `{class Fish extends Object
                             {size color}})
                    `{instanceof {new Object} Fish})
@@ -439,12 +483,13 @@ Razie Hyria - Mathyo Abou Asali|#
                                           {get arg color}}]})
                    `{send {new Bear 100 5} rate-food {new ColorFish 10 3}})
       `3)
-;; Module test cases---------------
+;; Module test cases--------------- 
 
 (module+ test
   (define posn-class
     (values 'Posn
-            (classC 
+            (classC
+             'Object   ;; update test case for pt3
              (list 'x 'y)
              (list (values 'mdist
                            (plusE (getE (thisE) 'x) (getE (thisE) 'y)))
@@ -458,7 +503,8 @@ Razie Hyria - Mathyo Abou Asali|#
     
   (define posn3D-class
     (values 'Posn3D
-            (classC 
+            (classC
+             'Object   ;; update test case for pt3
              (list 'x 'y 'z)
              (list (values 'mdist (plusE (getE (thisE) 'z)
                                          (ssendE (thisE) 'Posn 'mdist (argE))))
@@ -477,7 +523,7 @@ Razie Hyria - Mathyo Abou Asali|#
             "not found: a")
   (test/exn (find (list (values 'a 1)) 'x)
             "not found: x")
-  
+   
   (test (interp (numE 10) 
                 empty (objV 'Object empty) (numV 0))
         (numV 10))
@@ -550,16 +596,13 @@ Razie Hyria - Mathyo Abou Asali|#
              (list posn3d-mdist-i-method))))
   (define posn3d-c-class-not-flat
     (values 'Posn3D
-            (classC (list 'z)
+            (classC 'Object (list 'z)
                     (list posn3d-mdist-c-method))))
 
-  (test (class-i->c-not-flat (snd posn3d-i-class))
-        (snd posn3d-c-class-not-flat))
-  
   (define posn-i-class
     (values
      'Posn
-     (classI 'Object
+     (classI 'Object ;; update test case for pt3
              (list 'x 'y)
              (list (values 'mdist
                            (plusI (getI (thisI) 'x)
@@ -574,14 +617,14 @@ Razie Hyria - Mathyo Abou Asali|#
   (define posn-c-class-not-flat
     (values
      'Posn
-    (classC (list 'x 'y)
+    (classC 'Object (list 'x 'y) ;; update test case for pt3
             (list (values 'mdist
                           (plusE (getE (thisE) 'x)
                                  (getE (thisE) 'y)))
                   addDist-c-method))))
   (define posn3d-c-class
     (values 'Posn3D
-            (classC (list 'x 'y 'z)
+            (classC 'Object (list 'x 'y 'z) ;; update test case for pt3
                     (list posn3d-mdist-c-method
                           addDist-c-method))))
   (test (flatten-class 'Posn3D
